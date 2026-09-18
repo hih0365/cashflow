@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>입출금 관리</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --paper:#F3F6F4; --sheet:#FFFFFF; --ink:#16302A; --muted:#5E7069; --line:#D5DFDA; --rule:#E8EEEB;
+  --dep:#1E5AA8; --wd:#B23A3A; --brand:#1F4D3A; --brand-ink:#FFFFFF; --focus:#E0A526;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font:15px/1.55 "IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.hidden{display:none!important}
+
+/* login gate */
+#gate{position:fixed;inset:0;display:grid;place-items:center;background:var(--brand);color:var(--brand-ink);z-index:50;padding:24px}
+#gate .box{max-width:340px;text-align:center}
+#gate h1{font-size:28px;margin:0 0 8px;font-weight:700;letter-spacing:-.01em}
+#gate p{margin:0 0 24px;opacity:.8}
+#gate .err{color:#FFD9D9;margin-top:16px;min-height:1.5em}
+.btn-google{background:#fff;color:var(--ink);border:0;border-radius:6px;padding:12px 20px;font-weight:600;cursor:pointer;display:inline-flex;gap:10px;align-items:center}
+
+/* layout */
+.wrap{max-width:1080px;margin:0 auto;padding:20px 20px 64px}
+header.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px}
+header.top h1{margin:0;font-size:20px;font-weight:700}
+.who{font-size:13px;color:var(--muted);display:flex;gap:10px;align-items:center}
+.link{background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;cursor:pointer;font-size:13px}
+
+/* passbook */
+.book{background:var(--sheet);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.spines{display:flex;gap:0;border-bottom:1px solid var(--line);overflow-x:auto;background:#EAF0ED}
+.spine{border:0;border-right:1px solid var(--line);background:transparent;padding:12px 22px 10px;text-align:left;cursor:pointer;min-width:132px;position:relative}
+.spine .y{display:block;font-weight:700;font-size:15px}
+.spine .b{display:block;font-size:13px;color:var(--muted)}
+.spine[aria-selected="true"]{background:var(--sheet)}
+.spine[aria-selected="true"]::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--sheet)}
+.spine[aria-selected="true"]::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--brand)}
+.spine.add{min-width:auto;color:var(--muted);font-size:13px}
+
+.balance{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:0;border-bottom:1px solid var(--line)}
+.balance>div{padding:20px 24px}
+.balance>div+div{border-left:1px solid var(--rule)}
+.balance .k{font-size:13px;color:var(--muted)}
+.balance .v{font-size:17px;font-weight:600;margin-top:2px}
+.balance .main .v{font-size:34px;font-weight:700;letter-spacing:-.02em;line-height:1.2}
+.balance .main .v small,.balance .v small{font-size:14px;font-weight:500;color:var(--muted);margin-left:4px}
+.balance .asof{font-size:12px;color:var(--muted);margin-top:4px}
+.dep{color:var(--dep)} .wd{color:var(--wd)}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.toolbar .grow{flex:1 1 200px}
+.search{width:100%;border:1px solid var(--line);border-radius:6px;padding:8px 12px;background:#fff}
+.btn{border:1px solid var(--line);background:#fff;border-radius:6px;padding:8px 14px;cursor:pointer;font-size:14px;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink);font-weight:600}
+.btn.danger{color:var(--wd);border-color:#E5C3C3}
+
+/* ledger table */
+.ledger{width:100%;border-collapse:collapse}
+.ledger th{font-size:12px;font-weight:600;color:var(--muted);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);background:#FAFCFB;position:sticky;top:0}
+.ledger td{padding:10px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+.ledger tbody tr{cursor:pointer}
+.ledger tbody tr:hover td{background:#F6FAF8}
+.num{text-align:right;white-space:nowrap}
+.ledger td.date{white-space:nowrap;color:var(--muted)}
+.ledger td.bal{font-weight:600}
+.ledger .remark{color:var(--muted);font-size:13px}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;font-weight:600}
+.tag.dep{background:#E4EDF8} .tag.wd{background:#F6E4E4}
+.tablebox{max-height:62vh;overflow:auto}
+.empty{padding:48px 24px;text-align:center;color:var(--muted)}
+.empty .btn{margin-top:12px}
+.foot{display:flex;justify-content:space-between;padding:12px 16px;font-size:13px;color:var(--muted)}
+
+/* modal */
+dialog{border:0;border-radius:10px;padding:0;width:min(460px,calc(100vw - 32px));color:var(--ink)}
+dialog::backdrop{background:rgba(22,48,42,.45)}
+.mhead{padding:18px 22px 0;font-weight:700;font-size:17px}
+.mbody{padding:16px 22px;display:grid;gap:12px}
+.mfoot{padding:0 22px 20px;display:flex;gap:8px;justify-content:flex-end}
+.mfoot .left{margin-right:auto}
+label.f{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;color:var(--ink);font-size:15px}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:9px;cursor:pointer;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed="true"].d{background:var(--dep);color:#fff}
+.seg button[aria-pressed="true"].w{background:var(--wd);color:#fff}
+.amt{position:relative}
+.amt input{width:100%;padding-right:48px!important;text-align:right}
+.amt span{position:absolute;right:12px;bottom:10px;color:var(--muted);font-size:14px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.msg{font-size:14px;color:var(--muted);line-height:1.6}
+
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:6px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:60}
+#toast.show{opacity:1}
+
+@media (max-width:720px){
+  .wrap{padding:12px 12px 64px}
+  .balance{grid-template-columns:1fr 1fr}
+  .balance .main{grid-column:1/-1;border-bottom:1px solid var(--rule)}
+  .balance>div+div{border-left:0}
+  .balance>div:last-child{border-left:1px solid var(--rule)}
+  .balance>div{padding:14px 16px}
+  .ledger thead{display:none}
+  .ledger tr{display:grid;grid-template-columns:1fr auto;padding:10px 14px;border-bottom:1px solid var(--rule)}
+  .ledger td{border:0;padding:0}
+  .ledger td.date{grid-column:1;font-size:13px}
+  .ledger td.type{display:none}
+  .ledger td.amt-c{grid-column:2;grid-row:1 / span 2;font-size:16px;font-weight:600}
+  .ledger td.desc{grid-column:1}
+  .ledger td.bal{grid-column:2;font-size:12px;font-weight:400;color:var(--muted)}
+  .ledger td.bal::before{content:"잔액 "}
+  .tablebox{max-height:none}
+  .row2{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){#toast{transition:none}}
+</style>
+</head>
+<body>
+<div id="gate">
+  <div class="box">
+    <h1>입출금 관리</h1>
+    <p>관리자 계정으로 로그인해야 내역을 볼 수 있습니다.</p>
+    <button class="btn-google" id="btnLogin">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+      Google 계정으로 로그인
+    </button>
+    <div class="err" id="gateErr" role="alert"></div>
+  </div>
+</div>
+
+<div class="wrap hidden" id="app">
+  <header class="top">
+    <h1>입출금 관리</h1>
+    <div class="who"><span id="whoEmail"></span><button class="link" id="btnLogout">로그아웃</button></div>
+  </header>
+
+  <section class="book" aria-label="연도별 입출금 통장">
+    <div class="spines" role="tablist" id="spines"></div>
+
+    <div class="balance">
+      <div class="main">
+        <div class="k" id="balLabel">보유현금</div>
+        <div class="v" id="balValue">0<small>만원</small></div>
+        <div class="asof" id="asOf"></div>
+      </div>
+      <div><div class="k">입금 합계</div><div class="v dep" id="sumIn">0<small>만원</small></div></div>
+      <div><div class="k">송금 합계</div><div class="v wd" id="sumOut">0<small>만원</small></div></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="grow"><input class="search" id="q" type="search" placeholder="입금자, 내용, 비고로 찾기" aria-label="내역 검색"></div>
+      <button class="btn primary" id="btnAdd">내역 추가</button>
+      <button class="btn hidden" id="btnCarry">전년도 잔금 이월</button>
+      <button class="btn" id="btnImport">Excel 가져오기</button>
+      <button class="btn" id="btnExport">Excel 내보내기</button>
+      <input type="file" id="fileIn" accept=".xlsx,.xls" class="hidden">
+    </div>
+
+    <div class="tablebox">
+      <table class="ledger">
+        <thead><tr><th>날짜</th><th>구분</th><th>입금자 / 내용</th><th class="num">금액(만원)</th><th class="num">잔액(만원)</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="empty hidden" id="empty"></div>
+    </div>
+    <div class="foot"><span id="countInfo"></span><span id="syncInfo">동기화 대기</span></div>
+  </section>
+</div>
+
+<dialog id="dlgEntry">
+  <form method="dialog" id="entryForm">
+    <div class="mhead" id="entryTitle">내역 추가</div>
+    <div class="mbody">
+      <div class="seg" role="group" aria-label="구분">
+        <button type="button" class="d" data-t="in" aria-pressed="true">입금</button>
+        <button type="button" class="w" data-t="out" aria-pressed="false">송금</button>
+      </div>
+      <div class="row2">
+        <label class="f">날짜<input type="date" id="fDate" required></label>
+        <label class="f">금액<div class="amt"><input type="number" id="fAmt" step="0.01" min="0" inputmode="decimal" required><span>만원</span></div></label>
+      </div>
+      <label class="f">입금자 / 수취인<input type="text" id="fParty" maxlength="60"></label>
+      <label class="f">내용<input type="text" id="fContent" maxlength="120" required></label>
+      <label class="f">비고<input type="text" id="fRemark" maxlength="160"></label>
+    </div>
+    <div class="mfoot">
+      <button type="button" class="btn danger left hidden" id="btnDel">삭제</button>
+      <button type="button" class="btn" id="btnCancel">취소</button>
+      <button type="submit" class="btn primary" id="btnSave">저장</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgImport">
+  <div class="mhead">Excel 가져오기</div>
+  <div class="mbody"><div class="msg" id="impMsg"></div></div>
+  <div class="mfoot">
+    <button type="button" class="btn left" id="impCancel">취소</button>
+    <button type="button" class="btn" id="impAppend">기존 내역에 추가</button>
+    <button type="button" class="btn primary" id="impReplace">해당 연도 교체</button>
+  </div>
+</dialog>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+/* ===================== 설정 =====================
+ * mybankinfo.html 과 같은 Firebase 프로젝트(my-schedule-d40f0)의
+ * firebaseConfig 값을 그대로 붙여넣으세요.
+ */
+const firebaseConfig = {
+  apiKey: "AIzaSyCBSaHe11LVv-bQ4e8yf0jEWquVjwTcJi8",
+  authDomain: "my-tools-5f8ac.firebaseapp.com",
+  projectId: "my-tools-5f8ac",
+  storageBucket: "my-tools-5f8ac.firebasestorage.app",
+  messagingSenderId: "188948905294",
+  appId: "1:188948905294:web:f0fcac45dd876496af721f",
+  measurementId: "G-XP57813635"
+};
+const ADMIN_EMAIL = "hih100930@gmail.com";
+const COLL = "cashflow";          // cashflow/{email}/entries/{id}
+/* ================================================= */
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const round = n => Math.round(n * 10000) / 10000;
+const fmt = n => (round(n)||0).toLocaleString("ko-KR", {maximumFractionDigits: 2});
+const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0,10); };
+const yearOf = e => +e.date.slice(0,4);
+
+let entries = [];          // {id,date,amount,party,content,remark,seq}
+let curYear = new Date().getFullYear();
+let unsub = null, colRef = null, editingId = null, entryType = "in", pendingImport = null;
+
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2400); }
+
+/* ---------- 인증 ---------- */
+$("btnLogin").onclick = async () => {
+  $("gateErr").textContent = "";
+  try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+  catch(e){ $("gateErr").textContent = "로그인하지 못했습니다: " + (e.code || e.message); }
+};
+$("btnLogout").onclick = () => auth.signOut();
+
+auth.onAuthStateChanged(async user => {
+  if (unsub) { unsub(); unsub = null; }
+  if (!user) { $("gate").classList.remove("hidden"); $("app").classList.add("hidden"); entries = []; return; }
+  if (user.email !== ADMIN_EMAIL) {
+    await auth.signOut();
+    $("gateErr").textContent = user.email + " 계정은 접근 권한이 없습니다. 관리자 계정으로 로그인하세요.";
+    return;
+  }
+  $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
+  $("whoEmail").textContent = user.email;
+  colRef = db.collection(COLL).doc(user.email).collection("entries");
+  // onSnapshot 단일 리스너 (get() 이중 읽기 없음)
+  unsub = colRef.onSnapshot(snap => {
+    entries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const src = snap.metadata.fromCache ? "오프라인 캐시" : "동기화됨";
+    $("syncInfo").textContent = src + " " + new Date().toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
+    const ys = years();
+    if (!ys.includes(curYear) && ys.length) curYear = ys[ys.length-1];
+    render();
+  }, err => {
+    $("syncInfo").textContent = "동기화 오류";
+    toast("불러오지 못했습니다: " + err.code + " (Firestore 규칙을 확인하세요)");
+  });
+});
+
+/* ---------- 계산 ---------- */
+function years(){
+  const s = new Set(entries.map(yearOf)); s.add(new Date().getFullYear()); s.add(curYear);
+  return [...s].sort((a,b)=>a-b);
+}
+const sorted = list => [...list].sort((a,b)=> a.date===b.date ? (a.seq||0)-(b.seq||0) : a.date<b.date?-1:1);
+function yearStats(y){
+  const list = entries.filter(e=>yearOf(e)===y);
+  let inn=0,out=0; list.forEach(e=> e.amount>=0 ? inn+=e.amount : out+=e.amount);
+  return { list, inn:round(inn), out:round(out), bal:round(inn+out) };
+}
+
+/* ---------- 렌더 ---------- */
+function render(){
+  // 연도 탭 (통장 책등)
+  const sp = $("spines"); sp.innerHTML = "";
+  years().forEach(y=>{
+    const st = yearStats(y);
+    const b = document.createElement("button");
+    b.className="spine"; b.setAttribute("role","tab"); b.setAttribute("aria-selected", y===curYear);
+    b.innerHTML = `<span class="y">${y}년</span><span class="b">${st.list.length ? fmt(st.bal)+" 만원" : "내역 없음"}</span>`;
+    b.onclick = ()=>{ curYear=y; render(); };
+    sp.appendChild(b);
+  });
+  const addY = document.createElement("button");
+  addY.className="spine add"; addY.textContent="+ 연도";
+  addY.onclick = ()=>{ const y = prompt("새 연도를 입력하세요 (예: 2027)", years().at(-1)+1); if(/^\d{4}$/.test(y||"")){ curYear=+y; render(); } };
+  sp.appendChild(addY);
+
+  const st = yearStats(curYear);
+  $("balLabel").textContent = `${curYear}년 보유현금`;
+  $("balValue").innerHTML = `${fmt(st.bal)}<small>만원</small>`;
+  $("balValue").className = "v" + (st.bal<0?" wd":"");
+  $("asOf").textContent = todayISO() + " 기준";
+  $("sumIn").innerHTML = `${fmt(st.inn)}<small>만원</small>`;
+  $("sumOut").innerHTML = `${fmt(-st.out)}<small>만원</small>`;
+
+  // 이월 버튼: 전년도 내역이 있고 올해 이월 항목이 없을 때만
+  const prev = yearStats(curYear-1);
+  const hasCarry = st.list.some(e=>e.carry || /잔금\s*(이월|이기)/.test(e.content||""));
+  $("btnCarry").classList.toggle("hidden", !prev.list.length || hasCarry);
+  $("btnCarry").textContent = `${curYear-1}년 잔금 이월 (${fmt(prev.bal)}만원)`;
+
+  // 원장
+  const q = $("q").value.trim().toLowerCase();
+  let run = 0; const rows = [];
+  sorted(st.list).forEach(e=>{
+    run = round(run + e.amount);
+    const hay = (e.party+" "+e.content+" "+e.remark+" "+e.date).toLowerCase();
+    if (q && !hay.includes(q)) return;
+    const dep = e.amount>=0;
+    rows.push(`<tr data-id="${e.id}" tabindex="0">
+      <td class="date">${e.date.slice(5).replace("-",".")}</td>
+      <td class="type"><span class="tag ${dep?"dep":"wd"}">${dep?"입금":"송금"}</span></td>
+      <td class="desc"><b>${esc(e.party)}</b> ${esc(e.content)}${e.remark?`<div class="remark">${esc(e.remark)}</div>`:""}</td>
+      <td class="num amt-c ${dep?"dep":"wd"}">${dep?"+":""}${fmt(e.amount)}</td>
+      <td class="num bal">${fmt(run)}</td></tr>`);
+  });
+  $("rows").innerHTML = rows.join("");
+  const em = $("empty");
+  if (!st.list.length) {
+    em.innerHTML = `${curYear}년 내역이 없습니다.<br>첫 내역을 추가하거나 기존 Excel 파일을 가져오세요.`;
+    em.classList.remove("hidden");
+  } else if (!rows.length) {
+    em.textContent = `"${$("q").value}"에 맞는 내역이 없습니다.`; em.classList.remove("hidden");
+  } else em.classList.add("hidden");
+  $("countInfo").textContent = `${curYear}년 ${st.list.length}건` + (q?` 중 ${rows.length}건 표시`:"");
+}
+$("q").oninput = render;
+$("rows").addEventListener("click", ev=>{ const tr=ev.target.closest("tr[data-id]"); if(tr) openEntry(tr.dataset.id); });
+$("rows").addEventListener("keydown", ev=>{ if(ev.key==="Enter"){ const tr=ev.target.closest("tr[data-id]"); if(tr) openEntry(tr.dataset.id); }});
+
+/* ---------- 입력/수정 ---------- */
+function setType(t){ entryType=t; document.querySelectorAll(".seg button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.t===t)); }
+document.querySelectorAll(".seg button").forEach(b=> b.onclick=()=>setType(b.dataset.t));
+
+function openEntry(id){
+  editingId = id || null;
+  const e = id ? entries.find(x=>x.id===id) : null;
+  $("entryTitle").textContent = e ? "내역 수정" : "내역 추가";
+  setType(e ? (e.amount>=0?"in":"out") : "out");
+  const def = curYear===new Date().getFullYear() ? todayISO() : `${curYear}-01-01`;
+  $("fDate").value = e ? e.date : def;
+  $("fAmt").value = e ? Math.abs(e.amount) : "";
+  $("fParty").value = e?.party || ""; $("fContent").value = e?.content || ""; $("fRemark").value = e?.remark || "";
+  $("btnDel").classList.toggle("hidden", !e);
+  $("dlgEntry").showModal(); $("fAmt").focus();
+}
+$("btnAdd").onclick = ()=>openEntry();
+$("btnCancel").onclick = ()=>$("dlgEntry").close();
+
+$("entryForm").onsubmit = async ev=>{
+  ev.preventDefault();
+  const amt = parseFloat($("fAmt").value);
+  if (!(amt>0)) { toast("금액을 0보다 크게 입력하세요."); return; }
+  const data = {
+    date: $("fDate").value,
+    amount: round(entryType==="in" ? amt : -amt),
+    party: $("fParty").value.trim(), content: $("fContent").value.trim(), remark: $("fRemark").value.trim(),
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  $("btnSave").disabled = true;
+  try {
+    if (editingId) await colRef.doc(editingId).update(data);
+    else await colRef.add({ ...data, seq: Date.now() });
+    curYear = +data.date.slice(0,4);
+    $("dlgEntry").close(); toast(editingId ? "수정했습니다." : "추가했습니다.");
+  } catch(e){ toast("저장하지 못했습니다: " + e.code); }
+  finally { $("btnSave").disabled = false; }
+};
+$("btnDel").onclick = async ()=>{
+  const e = entries.find(x=>x.id===editingId); if(!e) return;
+  if (!confirm(`${e.date} ${e.content} (${fmt(e.amount)}만원) 내역을 삭제할까요?`)) return;
+  try { await colRef.doc(editingId).delete(); $("dlgEntry").close(); toast("삭제했습니다."); }
+  catch(err){ toast("삭제하지 못했습니다: " + err.code); }
+};
+
+/* ---------- 전년도 잔금 이월 ---------- */
+$("btnCarry").onclick = async ()=>{
+  const prev = yearStats(curYear-1);
+  if (!confirm(`${curYear-1}년 잔액 ${fmt(prev.bal)}만원을 ${curYear}년 1월 1일 입금으로 이월할까요?`)) return;
+  await colRef.add({ date:`${curYear}-01-01`, amount:prev.bal, party:"이월", content:`${curYear-1}년 잔금 이월`,
+    remark:"", carry:true, seq:0, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+  toast("이월했습니다.");
+};
+
+/* ---------- Excel 가져오기 ---------- */
+function excelSerialToISO(n){ return new Date(Math.round((n-25569)*86400000)).toISOString().slice(0,10); }
+function parseDateCell(v){
+  if (v==null || v==="") return null;
+  if (typeof v==="number" && v>30000 && v<80000) return excelSerialToISO(v);
+  const m = String(v).trim().match(/(\d{4})\s*[년.\-/]\s*(\d{1,2})\s*[월.\-/]\s*(\d{1,2})/);
+  return m ? `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}` : null;
+}
+// '입출금(YY년)' 시트의 'A.입출금 내역' 표를 읽고 '현재 보유현금' 행에서 멈춤
+function parseWorkbook(wb){
+  const out = [];
+  wb.SheetNames.forEach(name=>{
+    if (!/입출금\s*\(\s*\d{2,4}\s*년\s*\)/.test(name)) return;
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, raw:true, defval:null});
+    const str = v => (v ?? "").toString().trim();
+    let c = -1, seq = 0;
+    for (const r of rows){
+      if (c<0){ c = r.findIndex(v=>typeof v==="string" && v.includes("입출금 내역")); continue; }
+      const b = r[c];
+      if (typeof b==="string" && b.includes("보유현금")) break;
+      const date = parseDateCell(b), amt = r[c+1];
+      if (!date || typeof amt!=="number") continue;
+      out.push({ date, amount: round(amt), party: str(r[c+4]), content: str(r[c+5]), remark: str(r[c+6]), seq: seq++ });
+    }
+  });
+  return out;
+}
+$("btnImport").onclick = ()=>$("fileIn").click();
+$("fileIn").onchange = async ev=>{
+  const f = ev.target.files[0]; ev.target.value = ""; if(!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), {type:"array"});
+    const list = parseWorkbook(wb);
+    if (!list.length) { toast("'입출금(YY년)' 시트에서 내역을 찾지 못했습니다."); return; }
+    const ys = [...new Set(list.map(yearOf))].sort();
+    const lines = ys.map(y=>{
+      const l = list.filter(e=>yearOf(e)===y), s = round(l.reduce((a,e)=>a+e.amount,0));
+      const ex = entries.filter(e=>yearOf(e)===y).length;
+      return `<b>${y}년</b> ${l.length}건, 잔액 ${fmt(s)}만원` + (ex?` (현재 등록 ${ex}건)`:"");
+    });
+    pendingImport = { list, ys };
+    $("impMsg").innerHTML = `${esc(f.name)}에서 다음 내역을 읽었습니다.<br>${lines.join("<br>")}<br><br>
+      <b>해당 연도 교체</b>는 위 연도의 기존 내역을 지우고 새로 등록합니다.`;
+    $("dlgImport").showModal();
+  } catch(e){ toast("파일을 읽지 못했습니다: " + e.message); }
+};
+$("impCancel").onclick = ()=>{ pendingImport=null; $("dlgImport").close(); };
+$("impAppend").onclick = ()=>doImport(false);
+$("impReplace").onclick = ()=>doImport(true);
+
+async function commitOps(ops){ // Firestore 배치 한도(500) 대비 450건씩
+  for (let i=0;i<ops.length;i+=450){
+    const batch = db.batch(); ops.slice(i,i+450).forEach(fn=>fn(batch)); await batch.commit();
+  }
+}
+async function doImport(replace){
+  if (!pendingImport) return;
+  const { list, ys } = pendingImport; $("dlgImport").close();
+  const ops = [];
+  if (replace) entries.filter(e=>ys.includes(yearOf(e))).forEach(e=> ops.push(b=>b.delete(colRef.doc(e.id))));
+  const base = Date.now();
+  list.forEach((e,i)=> ops.push(b=>b.set(colRef.doc(), { ...e, seq: base+i, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })));
+  try { await commitOps(ops); curYear = ys.at(-1); toast(`${list.length}건을 가져왔습니다.`); }
+  catch(e){ toast("가져오지 못했습니다: " + e.code); }
+  pendingImport = null;
+}
+
+/* ---------- Excel 내보내기 (연도별 시트, 원본 양식과 같은 열 순서) ---------- */
+$("btnExport").onclick = ()=>{
+  const ys = [...new Set(entries.map(yearOf))].sort((a,b)=>b-a);
+  if (!ys.length) { toast("내보낼 내역이 없습니다."); return; }
+  const wb = XLSX.utils.book_new();
+  ys.forEach(y=>{
+    const st = yearStats(y);
+    const aoa = [["A.입출금 내역","금 액","","","입금자","내 용","Remark"]];
+    sorted(st.list).forEach(e=>{
+      const [yy,mm,dd] = e.date.split("-");
+      aoa.push([`${yy}년${mm}월 ${dd}일`, e.amount, "만원", e.amount>=0?"입금":"송금", e.party, e.content, e.remark]);
+    });
+    aoa.push([]);
+    const last = aoa.length - 1; // 합계 행 위치(0-base), 수식은 1-base
+    aoa.push(["현재 보유현금", null, "만원", "", "", todayISO(), "기준"]);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws[XLSX.utils.encode_cell({r:last+1,c:1})] = { t:"n", v: st.bal, f:`SUM(B2:B${last})` };
+    ws["!cols"] = [{wch:16},{wch:10},{wch:5},{wch:6},{wch:12},{wch:28},{wch:26}];
+    XLSX.utils.book_append_sheet(wb, ws, `입출금(${String(y).slice(2)}년)`);
+  });
+  XLSX.writeFile(wb, `입출금관리_${todayISO().replace(/-/g,"").slice(2)}.xlsx`, {compression:true});
+};
+</script>
+</body>
+</html>
