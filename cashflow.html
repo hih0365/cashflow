@@ -100,7 +100,18 @@ dialog::backdrop{background:rgba(22,48,42,.45)}
 .mfoot .left{margin-right:0}
 .mfoot{align-items:center}
 label.f{display:grid;gap:4px;font-size:13px;color:var(--muted)}
-label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;color:var(--ink);font-size:15px}
+label.f input,label.f select{border:1px solid var(--line);border-radius:6px;padding:9px 11px;color:var(--ink);font-size:15px;background:#fff}
+.mbody>*,.row2>*{min-width:0}
+label.f input,label.f select{width:100%;min-width:0}
+.lblrow{display:flex;justify-content:space-between;align-items:baseline}
+.acct-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:6px;max-height:260px;overflow:auto}
+.acct-list li{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--rule)}
+.acct-list li:last-child{border-bottom:0}
+.acct-list .nm{font-weight:600;white-space:nowrap}
+.acct-list .no{color:var(--muted);font-size:14px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acct-list li.editing{background:#F6FAF8}
+.acct-list .empty-li{color:var(--muted);font-size:14px;justify-content:center}
+.btn.sm{padding:4px 10px;font-size:13px}
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{border:0;background:#fff;padding:9px;cursor:pointer;font-weight:600;color:var(--muted)}
 .seg button[aria-pressed="true"].d{background:var(--dep);color:#fff}
@@ -178,6 +189,7 @@ label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;co
       <div class="grow"><input class="search" id="q" type="search" placeholder="입금자, 내용, 비고로 찾기" aria-label="내역 검색"></div>
       <button class="btn primary" id="btnAdd">내역 추가</button>
       <button class="btn hidden" id="btnCarry">전년도 잔금 이월</button>
+      <button class="btn" id="btnAccts">계좌 관리</button>
       <button class="btn" id="btnImport">Excel 가져오기</button>
       <button class="btn" id="btnExport">Excel 내보내기</button>
       <input type="file" id="fileIn" accept=".xlsx,.xls" class="hidden">
@@ -206,8 +218,10 @@ label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;co
         <label class="f">날짜<input type="date" id="fDate" required></label>
         <label class="f">금액<div class="amt"><input type="number" id="fAmt" step="0.01" min="0" inputmode="decimal" required><span>만원</span></div></label>
       </div>
-      <label class="f">입금자 / 수취인<input type="text" id="fParty" maxlength="60"></label>
-      <label class="f">내용<input type="text" id="fContent" maxlength="120" required></label>
+      <label class="f" id="acctWrap"><span class="lblrow"><span>금융기관 선택</span><button type="button" class="link" id="lnkAccts">계좌 관리</button></span>
+        <select id="fAcct"><option value="">직접 입력</option></select></label>
+      <label class="f"><span id="partyLbl">입금자</span><input type="text" id="fParty" maxlength="60"></label>
+      <label class="f"><span id="contentLbl">내용</span><input type="text" id="fContent" maxlength="120" required></label>
       <label class="f">비고<input type="text" id="fRemark" maxlength="160"></label>
     </div>
     <div class="mfoot">
@@ -217,6 +231,24 @@ label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;co
       <button type="submit" class="btn primary" id="btnSave">저장</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="dlgAcct">
+  <div class="mhead">계좌 관리</div>
+  <div class="mbody">
+    <ul class="acct-list" id="acctList"></ul>
+    <form id="acctForm" class="mbody" style="padding:0">
+      <div class="row2">
+        <label class="f">금융기관 이름<input type="text" id="aName" maxlength="40" required placeholder="예: 국민은행"></label>
+        <label class="f">계좌번호<input type="text" id="aNo" maxlength="40" inputmode="numeric" placeholder="예: 392-80204-251721"></label>
+      </div>
+    </form>
+  </div>
+  <div class="mfoot">
+    <button type="button" class="btn left hidden" id="aCancelEdit">새로 등록</button>
+    <button type="button" class="btn" id="aClose">닫기</button>
+    <button type="submit" form="acctForm" class="btn primary" id="aSave">계좌 등록</button>
+  </div>
 </dialog>
 
 <dialog id="dlgImport">
@@ -261,6 +293,8 @@ const yearOf = e => +e.date.slice(0,4);
 
 let entries = [];          // {id,date,amount,party,content,remark,seq}
 let curYear = new Date().getFullYear();
+let accounts = [];         // {id,name,number,seq}
+let unsubAcct = null, acctRef = null, editingAcctId = null;
 let unsub = null, colRef = null, editingId = null, entryType = "in", pendingImport = null;
 
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),2400); }
@@ -275,6 +309,7 @@ $("btnLogout").onclick = () => auth.signOut();
 
 auth.onAuthStateChanged(async user => {
   if (unsub) { unsub(); unsub = null; }
+  if (unsubAcct) { unsubAcct(); unsubAcct = null; }
   if (!user) { $("gate").classList.remove("hidden"); $("app").classList.add("hidden"); entries = []; return; }
   if (user.email !== ADMIN_EMAIL) {
     await auth.signOut();
@@ -284,6 +319,11 @@ auth.onAuthStateChanged(async user => {
   $("gate").classList.add("hidden"); $("app").classList.remove("hidden");
   $("whoEmail").textContent = user.email;
   colRef = db.collection(COLL).doc(user.email).collection("entries");
+  acctRef = db.collection(COLL).doc(user.email).collection("accounts");
+  unsubAcct = acctRef.onSnapshot(snap => {
+    accounts = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.seq||0)-(b.seq||0));
+    renderAccounts();
+  }, err => toast("계좌 목록을 불러오지 못했습니다: " + err.code + " (Firestore 규칙을 확인하세요)"));
   // onSnapshot 단일 리스너 (get() 이중 읽기 없음)
   unsub = colRef.onSnapshot(snap => {
     entries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -377,7 +417,27 @@ $("rows").addEventListener("click", ev=>{ const tr=ev.target.closest("tr[data-id
 $("rows").addEventListener("keydown", ev=>{ if(ev.key==="Enter"){ const tr=ev.target.closest("tr[data-id]"); if(tr) openEntry(tr.dataset.id); }});
 
 /* ---------- 입력/수정 ---------- */
-function setType(t){ entryType=t; document.querySelectorAll(".seg button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.t===t)); }
+function setType(t){
+  const changed = entryType !== t;
+  entryType=t; document.querySelectorAll(".seg button").forEach(b=>b.setAttribute("aria-pressed", b.dataset.t===t));
+  const dep = t==="in";
+  $("acctWrap").classList.toggle("hidden", !dep);          // 송금은 수취인 직접 입력
+  $("partyLbl").textContent = dep ? "입금자 (금융기관)" : "수취인";
+  $("contentLbl").textContent = dep ? "내용 (계좌번호)" : "내용";
+  if (!dep && changed && $("fAcct").value) {               // 계좌 선택으로 채운 값은 송금 전환 시 비움
+    $("fParty").value = ""; $("fContent").value = ""; $("fAcct").value = "";
+  }
+}
+function syncAcctSelect(){                                  // 입력값이 등록 계좌와 일치하면 자동 선택
+  const a = accounts.find(a=>a.name===$("fParty").value.trim() && (a.number||"")===$("fContent").value.trim());
+  $("fAcct").value = a ? a.id : "";
+}
+$("fAcct").onchange = ()=>{
+  const a = accounts.find(x=>x.id===$("fAcct").value);
+  if (a) { $("fParty").value = a.name; $("fContent").value = a.number || ""; $("fRemark").focus(); }
+  else { $("fParty").focus(); }
+};
+$("fParty").oninput = $("fContent").oninput = ()=>{ if(entryType==="in") syncAcctSelect(); };
 document.querySelectorAll(".seg button").forEach(b=> b.onclick=()=>setType(b.dataset.t));
 
 function openEntry(id){
@@ -390,6 +450,7 @@ function openEntry(id){
   $("fAmt").value = e ? Math.abs(e.amount) : "";
   $("fParty").value = e?.party || ""; $("fContent").value = e?.content || ""; $("fRemark").value = e?.remark || "";
   $("fPin").checked = !!e?.pinned;
+  syncAcctSelect();
   $("btnDel").classList.toggle("hidden", !e);
   $("dlgEntry").showModal(); $("fAmt").focus();
 }
@@ -421,6 +482,51 @@ $("btnDel").onclick = async ()=>{
   if (!confirm(`${e.date} ${e.content} (${fmt(e.amount)}만원) 내역을 삭제할까요?`)) return;
   try { await colRef.doc(editingId).delete(); $("dlgEntry").close(); toast("삭제했습니다."); }
   catch(err){ toast("삭제하지 못했습니다: " + err.code); }
+};
+
+/* ---------- 계좌 관리 ---------- */
+function renderAccounts(){
+  const sel = $("fAcct"), cur = sel.value;
+  sel.innerHTML = '<option value="">직접 입력</option>' + accounts.map(a=>
+    `<option value="${a.id}">${esc(a.name)}${a.number?"  "+esc(a.number):""}</option>`).join("");
+  if (accounts.some(a=>a.id===cur)) sel.value = cur;
+  $("acctList").innerHTML = accounts.length ? accounts.map(a=>`
+    <li data-id="${a.id}" class="${a.id===editingAcctId?"editing":""}">
+      <span class="nm">${esc(a.name)}</span><span class="no">${esc(a.number||"")}</span>
+      <button type="button" class="btn sm" data-act="edit">수정</button>
+      <button type="button" class="btn sm danger" data-act="del">삭제</button></li>`).join("")
+    : '<li class="empty-li">등록된 계좌가 없습니다. 아래에서 금융기관과 계좌번호를 등록하세요.</li>';
+}
+function resetAcctForm(){
+  editingAcctId = null; $("aName").value = ""; $("aNo").value = "";
+  $("aSave").textContent = "계좌 등록"; $("aCancelEdit").classList.add("hidden"); renderAccounts();
+}
+function openAccounts(){ resetAcctForm(); $("dlgAcct").showModal(); $("aName").focus(); }
+$("btnAccts").onclick = openAccounts;
+$("lnkAccts").onclick = openAccounts;
+$("aClose").onclick = ()=>$("dlgAcct").close();
+$("aCancelEdit").onclick = resetAcctForm;
+$("acctList").addEventListener("click", async ev=>{
+  const btn = ev.target.closest("button[data-act]"); if(!btn) return;
+  const a = accounts.find(x=>x.id===btn.closest("li").dataset.id); if(!a) return;
+  if (btn.dataset.act==="edit") {
+    editingAcctId = a.id; $("aName").value = a.name; $("aNo").value = a.number || "";
+    $("aSave").textContent = "수정 저장"; $("aCancelEdit").classList.remove("hidden"); renderAccounts(); $("aName").focus();
+  } else if (confirm(`${a.name} ${a.number||""} 계좌를 목록에서 삭제할까요?\n이미 저장된 입출금 내역은 그대로 남습니다.`)) {
+    try { await acctRef.doc(a.id).delete(); if(editingAcctId===a.id) resetAcctForm(); toast("계좌를 삭제했습니다."); }
+    catch(e){ toast("삭제하지 못했습니다: " + e.code); }
+  }
+});
+$("acctForm").onsubmit = async ev=>{
+  ev.preventDefault();
+  const name = $("aName").value.trim(), number = $("aNo").value.trim();
+  if (!name) return;
+  if (accounts.some(a=>a.id!==editingAcctId && a.name===name && (a.number||"")===number)) { toast("이미 등록된 계좌입니다."); return; }
+  try {
+    if (editingAcctId) { await acctRef.doc(editingAcctId).update({ name, number }); toast("계좌를 수정했습니다."); }
+    else { await acctRef.add({ name, number, seq: Date.now() }); toast("계좌를 등록했습니다."); }
+    resetAcctForm(); $("aName").focus();
+  } catch(e){ toast("저장하지 못했습니다: " + e.code + " (Firestore 규칙을 확인하세요)"); }
 };
 
 /* ---------- 전년도 잔금 이월 ---------- */
