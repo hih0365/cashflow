@@ -188,7 +188,6 @@ label.f input,label.f select{width:100%;min-width:0}
     <div class="toolbar">
       <div class="grow"><input class="search" id="q" type="search" placeholder="입금자, 내용, 비고로 찾기" aria-label="내역 검색"></div>
       <button class="btn primary" id="btnAdd">내역 추가</button>
-      <button class="btn hidden" id="btnCarry">전년도 잔금 이월</button>
       <button class="btn" id="btnAccts">계좌 관리</button>
       <button class="btn" id="btnImport">Excel 가져오기</button>
       <button class="btn" id="btnExport">Excel 내보내기</button>
@@ -375,12 +374,6 @@ function render(){
   $("sumIn").innerHTML = `${fmt(st.inn)}<small>만원</small>`;
   $("sumOut").innerHTML = `${fmt(-st.out)}<small>만원</small>`;
 
-  // 이월 버튼: 전년도 내역이 있고 올해 이월 항목이 없을 때만
-  const prev = yearStats(curYear-1);
-  const hasCarry = st.list.some(e=>e.carry || /잔금\s*(이월|이기)/.test(e.content||""));
-  $("btnCarry").classList.toggle("hidden", !prev.list.length || hasCarry);
-  $("btnCarry").textContent = `${curYear-1}년 잔금 이월 (${fmt(prev.bal)}만원)`;
-
   // 원장
   const q = $("q").value.trim().toLowerCase();
   let run = 0; const rows = [], pins = [];
@@ -444,7 +437,7 @@ function openEntry(id){
   editingId = id || null;
   const e = id ? entries.find(x=>x.id===id) : null;
   $("entryTitle").textContent = e ? "내역 수정" : "내역 추가";
-  setType(e ? (e.amount>=0?"in":"out") : "out");
+  setType(e ? (e.amount>=0?"in":"out") : "in");
   const def = curYear===new Date().getFullYear() ? todayISO() : `${curYear}-01-01`;
   $("fDate").value = e ? e.date : def;
   $("fAmt").value = e ? Math.abs(e.amount) : "";
@@ -527,15 +520,6 @@ $("acctForm").onsubmit = async ev=>{
     else { await acctRef.add({ name, number, seq: Date.now() }); toast("계좌를 등록했습니다."); }
     resetAcctForm(); $("aName").focus();
   } catch(e){ toast("저장하지 못했습니다: " + e.code + " (Firestore 규칙을 확인하세요)"); }
-};
-
-/* ---------- 전년도 잔금 이월 ---------- */
-$("btnCarry").onclick = async ()=>{
-  const prev = yearStats(curYear-1);
-  if (!confirm(`${curYear-1}년 잔액 ${fmt(prev.bal)}만원을 ${curYear}년 1월 1일 입금으로 이월할까요?`)) return;
-  await colRef.add({ date:`${curYear}-01-01`, amount:prev.bal, party:"이월", content:`${curYear-1}년 잔금 이월`,
-    remark:"", carry:true, seq:0, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-  toast("이월했습니다.");
 };
 
 /* ---------- Excel 가져오기 ---------- */
