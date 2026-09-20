@@ -76,7 +76,13 @@ header.top h1{margin:0;font-size:20px;font-weight:700}
 .num{text-align:right;white-space:nowrap}
 .ledger td.date{white-space:nowrap;color:var(--muted)}
 .ledger td.bal{font-weight:600}
-.ledger .remark{color:var(--muted);font-size:13px}
+.ledger td.remark{color:var(--muted);font-size:13px}
+.ledger tr.pinned td{background:#FBF6E6}
+.ledger tr.pinned:hover td{background:#F6EED3}
+.ledger tr.pinned.last td{border-bottom:2px solid #E3D3A0}
+.pin{font-size:12px;margin-right:4px}
+.pinchk{display:inline-flex;align-items:center;gap:6px;font-size:14px;cursor:pointer;user-select:none;margin-right:auto}
+.pinchk input{width:16px;height:16px;accent-color:var(--brand)}
 .tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;font-weight:600}
 .tag.dep{background:#E4EDF8} .tag.wd{background:#F6E4E4}
 .tablebox{max-height:62vh;overflow:auto}
@@ -90,7 +96,8 @@ dialog::backdrop{background:rgba(22,48,42,.45)}
 .mhead{padding:18px 22px 0;font-weight:700;font-size:17px}
 .mbody{padding:16px 22px;display:grid;gap:12px}
 .mfoot{padding:0 22px 20px;display:flex;gap:8px;justify-content:flex-end}
-.mfoot .left{margin-right:auto}
+.mfoot .left{margin-right:0}
+.mfoot{align-items:center}
 label.f{display:grid;gap:4px;font-size:13px;color:var(--muted)}
 label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;color:var(--ink);font-size:15px}
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:6px;overflow:hidden}
@@ -120,6 +127,11 @@ label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;co
   .ledger td.type{display:none}
   .ledger td.amt-c{grid-column:2;grid-row:1 / span 2;font-size:16px;font-weight:600}
   .ledger td.desc{grid-column:1}
+  .ledger td.remark{grid-column:1;font-size:12px}
+  .ledger td.remark:empty{display:none}
+  .ledger tr.pinned{background:#FBF6E6}
+  .ledger tr.pinned.last{border-bottom:2px solid #E3D3A0}
+  .ledger tr.pinned td,.ledger tr.pinned.last td,.ledger tr.pinned:hover td{background:transparent;border:0}
   .ledger td.bal{grid-column:2;font-size:12px;font-weight:400;color:var(--muted)}
   .ledger td.bal::before{content:"잔액 "}
   .tablebox{max-height:none}
@@ -171,7 +183,7 @@ label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;co
 
     <div class="tablebox">
       <table class="ledger">
-        <thead><tr><th>날짜</th><th>구분</th><th>입금자 / 내용</th><th class="num">금액(만원)</th><th class="num">잔액(만원)</th></tr></thead>
+        <thead><tr><th>날짜</th><th>구분</th><th>입금자 / 내용</th><th>비고</th><th class="num">금액(만원)</th><th class="num">잔액(만원)</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
       <div class="empty hidden" id="empty"></div>
@@ -197,6 +209,7 @@ label.f input{border:1px solid var(--line);border-radius:6px;padding:9px 11px;co
       <label class="f">비고<input type="text" id="fRemark" maxlength="160"></label>
     </div>
     <div class="mfoot">
+      <label class="pinchk" title="이 내역을 목록 맨 위에 항상 표시합니다"><input type="checkbox" id="fPin">상단 고정</label>
       <button type="button" class="btn danger left hidden" id="btnDel">삭제</button>
       <button type="button" class="btn" id="btnCancel">취소</button>
       <button type="submit" class="btn primary" id="btnSave">저장</button>
@@ -328,29 +341,33 @@ function render(){
 
   // 원장
   const q = $("q").value.trim().toLowerCase();
-  let run = 0; const rows = [];
+  let run = 0; const rows = [], pins = [];
   sorted(st.list).forEach(e=>{
     run = round(run + e.amount);
     const hay = (e.party+" "+e.content+" "+e.remark+" "+e.date).toLowerCase();
-    if (q && !hay.includes(q)) return;
     const dep = e.amount>=0;
-    rows.push(`<tr data-id="${e.id}" tabindex="0">
+    const tr = `<tr data-id="${e.id}" tabindex="0" class="${e.pinned?"pinned":""}">
       <td class="date">${e.date.slice(5).replace("-",".")}</td>
       <td class="type"><span class="tag ${dep?"dep":"wd"}">${dep?"입금":"송금"}</span></td>
-      <td class="desc"><b>${esc(e.party)}</b> ${esc(e.content)}${e.remark?`<div class="remark">${esc(e.remark)}</div>`:""}</td>
+      <td class="desc">${e.pinned?'<span class="pin" aria-label="상단 고정">📌</span>':""}<b>${esc(e.party)}</b> ${esc(e.content)}</td>
+      <td class="remark">${esc(e.remark)}</td>
       <td class="num amt-c ${dep?"dep":"wd"}">${dep?"+":""}${fmt(e.amount)}</td>
-      <td class="num bal">${fmt(run)}</td></tr>`);
+      <td class="num bal">${fmt(run)}</td></tr>`;
+    if (e.pinned) { pins.push(tr); return; }      // 고정 내역은 검색과 관계없이 항상 표시
+    if (q && !hay.includes(q)) return;
+    rows.push(tr);
   });
-  rows.reverse();
-  $("rows").innerHTML = rows.join("");
+  rows.reverse(); // 잔액은 오래된 순으로 누적 계산, 표시는 최신 날짜가 위로
+  if (pins.length) pins[pins.length-1] = pins[pins.length-1].replace('class="pinned"','class="pinned last"');
+  $("rows").innerHTML = pins.join("") + rows.join("");
   const em = $("empty");
   if (!st.list.length) {
     em.innerHTML = `${curYear}년 내역이 없습니다.<br>첫 내역을 추가하거나 기존 Excel 파일을 가져오세요.`;
     em.classList.remove("hidden");
-  } else if (!rows.length) {
+  } else if (!rows.length && !pins.length) {
     em.textContent = `"${$("q").value}"에 맞는 내역이 없습니다.`; em.classList.remove("hidden");
   } else em.classList.add("hidden");
-  $("countInfo").textContent = `${curYear}년 ${st.list.length}건` + (q?` 중 ${rows.length}건 표시`:"");
+  $("countInfo").textContent = `${curYear}년 ${st.list.length}건` + (q?` 중 ${rows.length+pins.length}건 표시`:"");
 }
 $("q").oninput = render;
 $("rows").addEventListener("click", ev=>{ const tr=ev.target.closest("tr[data-id]"); if(tr) openEntry(tr.dataset.id); });
@@ -369,6 +386,7 @@ function openEntry(id){
   $("fDate").value = e ? e.date : def;
   $("fAmt").value = e ? Math.abs(e.amount) : "";
   $("fParty").value = e?.party || ""; $("fContent").value = e?.content || ""; $("fRemark").value = e?.remark || "";
+  $("fPin").checked = !!e?.pinned;
   $("btnDel").classList.toggle("hidden", !e);
   $("dlgEntry").showModal(); $("fAmt").focus();
 }
@@ -383,6 +401,7 @@ $("entryForm").onsubmit = async ev=>{
     date: $("fDate").value,
     amount: round(entryType==="in" ? amt : -amt),
     party: $("fParty").value.trim(), content: $("fContent").value.trim(), remark: $("fRemark").value.trim(),
+    pinned: $("fPin").checked,
     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
   $("btnSave").disabled = true;
